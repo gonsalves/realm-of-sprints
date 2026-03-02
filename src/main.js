@@ -234,6 +234,9 @@ async function boot() {
   fog.getGroup().position.set(offset.x, 0, offset.z);
   scene.add(fog.getGroup());
 
+  // Reveal coastline so map edges are always visible
+  fog.revealCoastline(4);
+
   // Reveal base area (castle is at left side in v2 fan layout)
   const castleCol = mapInfo.castleCol;
   const castleRow = mapInfo.castleRow;

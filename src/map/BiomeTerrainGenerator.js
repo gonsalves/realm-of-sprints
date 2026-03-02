@@ -141,9 +141,13 @@ export class BiomeTerrainGenerator {
         const coastWarp = (coastNoise1 * 0.55 + coastNoise2 * 0.3 + coastNoise3 * 0.15 - 0.5) * 0.25;
 
         // Different noise sample for the angular edge (so top/bottom differ from the arc)
-        const angCoastNoise1 = valueNoise(col * 0.35 + 500, row * 0.35 + 500, 8);
-        const angCoastNoise2 = valueNoise(col * 0.8 + 600, row * 0.8 + 600, 4);
-        const angCoastWarp = (angCoastNoise1 * 0.6 + angCoastNoise2 * 0.4 - 0.5) * 0.2;
+        // Use distance-scaled amplitude: edges get more ragged further from castle
+        const angCoastNoise1 = valueNoise(col * 0.25 + 500, row * 0.25 + 500, 9);  // large inlets
+        const angCoastNoise2 = valueNoise(col * 0.6 + 600, row * 0.6 + 600, 5);    // medium jags
+        const angCoastNoise3 = valueNoise(col * 1.5 + 700, row * 1.5 + 700, 3);    // fine teeth
+        const angBase = angCoastNoise1 * 0.5 + angCoastNoise2 * 0.3 + angCoastNoise3 * 0.2 - 0.5;
+        const angAmplitude = 0.25 + rNorm * 0.15; // stronger warp further from castle
+        const angCoastWarp = angBase * angAmplitude;
 
         const fanEdgeDist = Math.abs(angle) / fanHalfAngle + angCoastWarp;
         const radialEdgeDist = rNorm + coastWarp;
@@ -189,6 +193,30 @@ export class BiomeTerrainGenerator {
         }
 
         grid.setTile(col, row, { type: finalType, biome, elevation: 0 });
+      }
+    }
+
+    // Grid-edge water/void border: ensure no land touches the grid boundary
+    // Creates a natural island shoreline around the entire map
+    const edgeBorderWidth = 3; // tiles of water/void at grid edges
+    for (let row = 0; row < grid.height; row++) {
+      for (let col = 0; col < grid.width; col++) {
+        const tile = grid.getTile(col, row);
+        if (!tile || tile.type === TileType.VOID) continue;
+
+        // Distance to nearest grid edge
+        const edgeDist = Math.min(col, row, grid.width - 1 - col, grid.height - 1 - row);
+        if (edgeDist >= edgeBorderWidth) continue;
+
+        // Noise-warped border so it's not a straight line
+        const edgeNoise = valueNoise(col * 0.6 + 900, row * 0.6 + 900, 5);
+        const warpedDist = edgeDist + (edgeNoise - 0.5) * 1.5;
+
+        if (warpedDist < 1.0) {
+          grid.setTile(col, row, { type: TileType.VOID, biome: null });
+        } else if (warpedDist < 2.2) {
+          grid.setTile(col, row, { type: TileType.WATER, biome: null });
+        }
       }
     }
 

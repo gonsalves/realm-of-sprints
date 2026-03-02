@@ -189,6 +189,73 @@ export class FogOfWar {
     }
   }
 
+  /**
+   * Permanently reveal all tiles near the map edge (coastline).
+   * Any non-void tile adjacent to a void or water-border tile is revealed,
+   * plus a buffer zone so the natural shoreline is always visible.
+   */
+  revealCoastline(bufferDepth = 3) {
+    const w = this.grid.width;
+    const h = this.grid.height;
+
+    // Mark tiles near the edge (within bufferDepth of void/water-border)
+    const edgeDist = new Uint8Array(w * h);
+    edgeDist.fill(255);
+
+    // First pass: seed distance=0 for void tiles
+    for (let row = 0; row < h; row++) {
+      for (let col = 0; col < w; col++) {
+        const tile = this.grid.getTile(col, row);
+        if (!tile || tile.type === 'void') {
+          edgeDist[row * w + col] = 0;
+        }
+      }
+    }
+
+    // BFS spread distance up to bufferDepth
+    const queue = [];
+    for (let i = 0; i < edgeDist.length; i++) {
+      if (edgeDist[i] === 0) queue.push(i);
+    }
+    let qi = 0;
+    while (qi < queue.length) {
+      const idx = queue[qi++];
+      const d = edgeDist[idx];
+      if (d >= bufferDepth) continue;
+      const col = idx % w;
+      const row = (idx - col) / w;
+      const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      for (const [dc, dr] of dirs) {
+        const nc = col + dc;
+        const nr = row + dr;
+        if (nc < 0 || nc >= w || nr < 0 || nr >= h) continue;
+        const ni = nr * w + nc;
+        if (edgeDist[ni] > d + 1) {
+          edgeDist[ni] = d + 1;
+          queue.push(ni);
+        }
+      }
+    }
+
+    // Reveal tiles within buffer distance of the edge
+    for (let row = 0; row < h; row++) {
+      for (let col = 0; col < w; col++) {
+        const tile = this.grid.getTile(col, row);
+        if (!tile || tile.type === 'void') continue;
+        const d = edgeDist[row * w + col];
+        if (d <= bufferDepth) {
+          // Closer to edge = more transparent, further = slightly foggier
+          const alpha = d <= 1 ? 0.0 : 0.05 + (d / bufferDepth) * 0.15;
+          this._setRevealFloor(col, row, alpha);
+          if (tile.fogState === FogState.HIDDEN) {
+            tile.fogState = FogState.REVEALED;
+          }
+        }
+      }
+    }
+    this._texture.needsUpdate = true;
+  }
+
   isRevealed(col, row) {
     const tile = this.grid.getTile(col, row);
     return tile && tile.fogState !== FogState.HIDDEN;
