@@ -63,6 +63,18 @@ export const THEME = {
     },
   },
 
+  // ─── Biome Colors (v2 fan-shaped map) ───────────────────────────
+  biomes: {
+    castle:       { primary: 0xC4A46C, secondary: 0xB8976A, accent: 0x8B7355 },  // Warm dirt/stone
+    meadow:       { primary: 0x8BD46A, secondary: 0x7EC850, accent: 0xA8E090 },  // Bright greens
+    hills:        { primary: 0x9BAA8A, secondary: 0x8A9E7A, accent: 0xBCC8B0 },  // Sage/mist
+    forest:       { primary: 0x3D7A37, secondary: 0x2D6A2A, accent: 0x4A8C40 },  // Dark greens
+    quarry:       { primary: 0xA89080, secondary: 0x9B8575, accent: 0xC4A896 },  // Warm stone/clay
+    scriptorium:  { primary: 0x8A8A7A, secondary: 0x7A7A6A, accent: 0xA0A090 },  // Parchment grey
+    market:       { primary: 0xC8B468, secondary: 0xB8A458, accent: 0xD8C878 },  // Sandy gold
+    summit:       { primary: 0xB0A8C0, secondary: 0xA098B0, accent: 0xC0B8D0 },  // Cool lavender stone
+  },
+
   // ─── Terrain Textures (Canvas2D procedural generation) ──────────
   terrainTextures: {
     grass: {
@@ -122,6 +134,31 @@ export const THEME = {
     depleted: {
       color: 0x888878,
       opacity: 0.35,
+    },
+    health: {
+      stagnant: {
+        color: 0x808080,         // desaturated grey
+        emissive: 0x000000,
+        emissiveIntensity: 0,
+        opacity: 0.6,
+        rotationSpeed: 0.15,     // slower rotation
+      },
+      atRisk: {
+        color: 0xF0A830,         // amber (same as normal marker, but glows)
+        emissive: 0xE8A020,
+        emissiveIntensity: 0.5,
+        pulseSpeed: 3.0,         // Hz for emissive pulsing
+        pulseAmplitude: 0.3,
+      },
+      overdue: {
+        color: 0xCC4444,         // red
+        emissive: 0xCC2222,
+        emissiveIntensity: 0.7,
+        pulseSpeed: 5.0,         // faster pulsing
+        pulseAmplitude: 0.4,
+        wobbleSpeed: 2.0,        // scale wobble
+        wobbleAmplitude: 0.05,
+      },
     },
   },
 

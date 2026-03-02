@@ -12,6 +12,21 @@ export const TileType = {
   VOID: 'void',
 };
 
+/**
+ * Biome identifiers for the fan-shaped v2 map.
+ * Each biome corresponds to a stage of work.
+ */
+export const Biome = {
+  CASTLE: 'castle',         // Home base area
+  MEADOW: 'meadow',         // Planning — open fields near castle
+  HILLS: 'hills',           // Ideating — misty standing stones
+  FOREST: 'forest',         // Exploration — dense pathless woods
+  QUARRY: 'quarry',         // Building — forge and construction
+  SCRIPTORIUM: 'scriptorium', // Documenting — library ruins
+  MARKET: 'market',         // Sharing — crossroads, trading post
+  SUMMIT: 'summit',         // Presenting — amphitheatre, high ground
+};
+
 export const FogState = {
   HIDDEN: 'hidden',
   REVEALED: 'revealed',
@@ -27,6 +42,7 @@ export class GameGrid {
     for (let i = 0; i < this.tiles.length; i++) {
       this.tiles[i] = {
         type: TileType.GRASS,
+        biome: null,
         elevation: 0,
         fogState: FogState.HIDDEN,
         resourceNodeId: null,

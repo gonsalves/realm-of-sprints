@@ -440,8 +440,8 @@ export class UnitManager {
         avatar.group.position.x += moveX;
         avatar.group.position.z += moveZ;
       }
-      avatar._faceDirection(dx, dz, dt);
-      avatar._updateWalkAnimation(dt);
+      avatar.faceDirection(dx, dz, dt);
+      avatar.updateWalkAnimation(dt);
     }
   }
 

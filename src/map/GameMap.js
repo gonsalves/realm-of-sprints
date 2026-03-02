@@ -10,6 +10,23 @@ const TILE_COLORS = {
   [TileType.FOREST]: THEME.terrain.tiles.forest,
 };
 
+/**
+ * Get a biome-tinted color for a tile.
+ * Blends the base tile color with the biome's primary color.
+ */
+function getBiomeTintedColor(tileType, biome) {
+  const baseColor = TILE_COLORS[tileType] || THEME.terrain.fallbackColor;
+  if (!biome || !THEME.biomes || !THEME.biomes[biome]) return baseColor;
+
+  const biomeColor = THEME.biomes[biome].primary;
+
+  // Blend: 60% base tile color + 40% biome tint
+  const base = new THREE.Color(baseColor);
+  const tint = new THREE.Color(biomeColor);
+  base.lerp(tint, 0.4);
+  return base.getHex();
+}
+
 // Resource node animation timing
 const DEPLETE_DURATION = 0.5;   // seconds to shrink away
 const REGROW_DELAY = 60;        // seconds before regrowing starts (very slow)
@@ -25,6 +42,7 @@ export class GameMap {
     this._structureLanterns = new Map(); // milestoneId → { light, mesh }
     this._structureProgress = new Map(); // milestoneId → progress (0-1)
     this._nodeAnimState = new Map(); // taskId → { phase, timer, permanent }
+    this._nodeHealthState = new Map(); // taskId → 'healthy'|'stagnant'|'atRisk'|'overdue'
     this._textures = textures;
     this._waterMaterial = null;
     this._time = 0;
@@ -36,25 +54,30 @@ export class GameMap {
     const tileGeo = new THREE.PlaneGeometry(1, 1);
     tileGeo.rotateX(-Math.PI / 2);
 
-    const byType = {};
+    // Group tiles by type+biome combination for biome-tinted rendering.
+    // Falls back to type-only grouping if tiles have no biome set (v1 compat).
+    const byGroup = {};
     for (let row = 0; row < this.grid.height; row++) {
       for (let col = 0; col < this.grid.width; col++) {
         const tile = this.grid.getTile(col, row);
-        if (tile.type === TileType.VOID) continue; // Don't render void tiles
-        if (!byType[tile.type]) byType[tile.type] = [];
-        byType[tile.type].push({ col, row });
+        if (tile.type === TileType.VOID) continue;
+        const groupKey = tile.biome ? `${tile.type}:${tile.biome}` : tile.type;
+        if (!byGroup[groupKey]) byGroup[groupKey] = { type: tile.type, biome: tile.biome, tiles: [] };
+        byGroup[groupKey].tiles.push({ col, row });
       }
     }
 
-    for (const [type, tiles] of Object.entries(byType)) {
+    for (const group of Object.values(byGroup)) {
+      const { type, biome, tiles } = group;
       const texture = this._textures ? this._textures[type] : null;
+      const color = texture ? 0xffffff : getBiomeTintedColor(type, biome);
       const mat = new THREE.MeshStandardMaterial({
-        color: texture ? 0xffffff : (TILE_COLORS[type] || THEME.terrain.fallbackColor),
+        color,
         map: texture || null,
         roughness: THEME.terrain.material.roughness,
         metalness: THEME.terrain.material.metalness,
       });
-      if (type === TileType.WATER) this._waterMaterial = mat;
+      if (type === TileType.WATER && !this._waterMaterial) this._waterMaterial = mat;
 
       const instanced = new THREE.InstancedMesh(tileGeo, mat, tiles.length);
       instanced.receiveShadow = true;
@@ -112,33 +135,45 @@ export class GameMap {
     this.group.add(crown);
   }
 
-  addResourceNode(taskId, col, row, color) {
+  /**
+   * Add a resource node visual for a task.
+   * @param {string} taskId
+   * @param {number} col
+   * @param {number} row
+   * @param {number} color
+   * @param {string} [size='medium'] — 'small', 'medium', or 'large'
+   */
+  addResourceNode(taskId, col, row, color, size = 'medium') {
     const world = this.grid.tileToWorld(col, row);
     const nodeGroup = new THREE.Group();
 
+    // Scale factor based on task size
+    const sizeScale = size === 'large' ? 1.5 : size === 'small' ? 0.65 : 1.0;
+
     // Abstract geometric marker — icosahedron on pedestal
-    const markerGeo = new THREE.IcosahedronGeometry(0.18, 0);
+    const markerGeo = new THREE.IcosahedronGeometry(0.18 * sizeScale, 0);
     const markerMat = new THREE.MeshStandardMaterial({
       color: THEME.resourceNodes.marker.color,
       roughness: THEME.resourceNodes.marker.roughness,
       metalness: THEME.resourceNodes.marker.metalness,
     });
     const marker = new THREE.Mesh(markerGeo, markerMat);
-    marker.position.set(world.x, 0.35, world.z);
+    marker.position.set(world.x, 0.35 * sizeScale, world.z);
     marker.castShadow = true;
     marker.userData.taskId = taskId;
     marker.userData.isResourceNode = true;
+    marker.userData.size = size;
     nodeGroup.add(marker);
 
-    // Small pedestal
-    const pedestalGeo = new THREE.CylinderGeometry(0.12, 0.14, 0.15, 6);
+    // Pedestal scales with marker
+    const pedestalGeo = new THREE.CylinderGeometry(0.12 * sizeScale, 0.14 * sizeScale, 0.15 * sizeScale, 6);
     const pedestalMat = new THREE.MeshStandardMaterial({
       color: THEME.resourceNodes.pedestal.color,
       roughness: THEME.resourceNodes.pedestal.roughness,
       metalness: THEME.resourceNodes.pedestal.metalness,
     });
     const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
-    pedestal.position.set(world.x, 0.075, world.z);
+    pedestal.position.set(world.x, 0.075 * sizeScale, world.z);
     pedestal.castShadow = true;
     pedestal.receiveShadow = true;
     nodeGroup.add(pedestal);
@@ -152,6 +187,35 @@ export class GameMap {
   setResourceNodeVisible(taskId, visible) {
     const group = this._resourceNodeGroups.get(taskId);
     if (group) group.visible = visible;
+  }
+
+  /**
+   * Relocate a resource node to a new grid position.
+   * Used when a task changes stage and needs to move to a different biome.
+   * @param {string} taskId
+   * @param {number} col — new grid column
+   * @param {number} row — new grid row
+   */
+  relocateResourceNode(taskId, col, row) {
+    const group = this._resourceNodeGroups.get(taskId);
+    if (!group) return;
+
+    const world = this.grid.tileToWorld(col, row);
+
+    // Move all children's positions relative to the new world position
+    group.traverse(child => {
+      if (child.isMesh) {
+        if (child.userData.isResourceNode) {
+          // Marker — reposition to new world coords, keep Y
+          child.position.x = world.x;
+          child.position.z = world.z;
+        } else {
+          // Pedestal
+          child.position.x = world.x;
+          child.position.z = world.z;
+        }
+      }
+    });
   }
 
   setResourceNodeDepleted(taskId) {
@@ -188,6 +252,120 @@ export class GameMap {
     const state = this._nodeAnimState.get(taskId);
     if (!state) return true; // no state = never depleted = available
     return state.phase === 'available';
+  }
+
+  /**
+   * Get the world position of a resource node's marker.
+   * @param {string} taskId
+   * @returns {{x: number, z: number}|null}
+   */
+  getResourceNodeWorldPosition(taskId) {
+    const group = this._resourceNodeGroups.get(taskId);
+    if (!group) return null;
+    let pos = null;
+    group.traverse(child => {
+      if (child.isMesh && child.userData.isResourceNode && !pos) {
+        pos = { x: child.position.x, z: child.position.z };
+      }
+    });
+    return pos;
+  }
+
+  /**
+   * Fully remove a resource node from the scene graph and internal maps.
+   * Used after portal completion animation is done.
+   * @param {string} taskId
+   */
+  removeResourceNode(taskId) {
+    const group = this._resourceNodeGroups.get(taskId);
+    if (!group) return;
+
+    // Dispose geometries and materials
+    group.traverse(child => {
+      if (child.isMesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      }
+    });
+
+    this.group.remove(group);
+    this._resourceNodeGroups.delete(taskId);
+    this._nodeAnimState.delete(taskId);
+    this._nodeHealthState.delete(taskId);
+  }
+
+  /**
+   * Set the health state of a resource node for visual treatment.
+   * Called from the health signal system on every store change.
+   * @param {string} taskId
+   * @param {'healthy'|'stagnant'|'atRisk'|'overdue'} state
+   */
+  setResourceNodeHealthState(taskId, state) {
+    const prev = this._nodeHealthState.get(taskId);
+    if (prev === state) return; // no change
+
+    this._nodeHealthState.set(taskId, state);
+
+    const group = this._resourceNodeGroups.get(taskId);
+    if (!group) return;
+
+    // Apply immediate material changes based on health state
+    const healthTheme = THEME.resourceNodes.health;
+
+    group.traverse(child => {
+      if (!child.isMesh || !child.material) return;
+
+      if (child.userData.isResourceNode) {
+        // Marker mesh — apply health-specific appearance
+        switch (state) {
+          case 'stagnant': {
+            const h = healthTheme.stagnant;
+            child.material.color.set(h.color);
+            child.material.emissive.set(h.emissive);
+            child.material.emissiveIntensity = h.emissiveIntensity;
+            child.material.opacity = h.opacity;
+            child.material.transparent = true;
+            break;
+          }
+          case 'atRisk': {
+            const h = healthTheme.atRisk;
+            child.material.color.set(h.color);
+            child.material.emissive.set(h.emissive);
+            child.material.emissiveIntensity = h.emissiveIntensity;
+            child.material.opacity = 1;
+            child.material.transparent = false;
+            break;
+          }
+          case 'overdue': {
+            const h = healthTheme.overdue;
+            child.material.color.set(h.color);
+            child.material.emissive.set(h.emissive);
+            child.material.emissiveIntensity = h.emissiveIntensity;
+            child.material.opacity = 1;
+            child.material.transparent = false;
+            break;
+          }
+          default: {
+            // healthy — restore normal appearance
+            child.material.color.set(THEME.resourceNodes.marker.color);
+            child.material.emissive.set(0x000000);
+            child.material.emissiveIntensity = 0;
+            child.material.opacity = 1;
+            child.material.transparent = false;
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Get the current health state of a resource node.
+   * @param {string} taskId
+   * @returns {'healthy'|'stagnant'|'atRisk'|'overdue'}
+   */
+  getResourceNodeHealthState(taskId) {
+    return this._nodeHealthState.get(taskId) || 'healthy';
   }
 
   /**
@@ -478,12 +656,39 @@ export class GameMap {
   update(dt) {
     this._time += dt;
 
-    // Slow rotation on resource node markers for visibility
+    // Rotation + health-based animation on resource node markers
+    const healthTheme = THEME.resourceNodes.health;
     for (const [taskId, group] of this._resourceNodeGroups) {
       if (!group.visible) continue;
+      const health = this._nodeHealthState.get(taskId) || 'healthy';
+
       group.traverse(child => {
-        if (child.isMesh && child.userData.isResourceNode) {
-          child.rotation.y += dt * 0.5;
+        if (!child.isMesh || !child.userData.isResourceNode) return;
+
+        // Rotation speed depends on health
+        const rotSpeed = health === 'stagnant'
+          ? (healthTheme.stagnant.rotationSpeed || 0.15)
+          : 0.5;
+        child.rotation.y += dt * rotSpeed;
+
+        // Emissive pulsing for atRisk/overdue
+        if (health === 'atRisk') {
+          const h = healthTheme.atRisk;
+          const pulse = h.emissiveIntensity + Math.sin(this._time * h.pulseSpeed * Math.PI * 2) * h.pulseAmplitude;
+          child.material.emissiveIntensity = Math.max(0, pulse);
+        } else if (health === 'overdue') {
+          const h = healthTheme.overdue;
+          const pulse = h.emissiveIntensity + Math.sin(this._time * h.pulseSpeed * Math.PI * 2) * h.pulseAmplitude;
+          child.material.emissiveIntensity = Math.max(0, pulse);
+
+          // Scale wobble for overdue (subtle instability feel)
+          const wobble = 1 + Math.sin(this._time * h.wobbleSpeed * Math.PI * 2) * h.wobbleAmplitude;
+          // Apply wobble to the group (not just marker) for cohesive feel
+          // But only if group isn't being animated by depletion system
+          const animState = this._nodeAnimState.get(taskId);
+          if (!animState || animState.phase === 'available' || !animState.phase) {
+            group.scale.set(wobble, wobble, wobble);
+          }
         }
       });
     }

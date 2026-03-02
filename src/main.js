@@ -5,6 +5,7 @@ import { SeedAdapter } from './data/SeedAdapter.js';
 import { GoogleSheetsAdapter } from './data/GoogleSheetsAdapter.js';
 import { GameGrid } from './map/GameGrid.js';
 import { TerrainGenerator } from './map/TerrainGenerator.js';
+import { BiomeTerrainGenerator } from './map/BiomeTerrainGenerator.js';
 import { GameMap } from './map/GameMap.js';
 import { FogOfWar } from './map/FogOfWar.js';
 import { Base } from './map/Base.js';
@@ -21,6 +22,11 @@ import { CONFIG } from './utils/Config.js';
 import { resourceColorForCategory } from './utils/Colors.js';
 import { computeStructureProgress } from './data/ResourceCalculator.js';
 import { THEME, THEME_NIGHT } from './utils/Theme.js';
+import { registerDefaultModels } from './models/registerDefaultModels.js';
+import { CastleEvolution } from './map/CastleEvolution.js';
+import { TownPortal } from './map/TownPortal.js';
+import { StagnationTracker, classifyTaskHealth, classifyWorkloads } from './data/HealthSignals.js';
+import { TaskPopup } from './ui/TaskPopup.js';
 
 // ─── Spawn Sequencer ─────────────────────────────────────────────────────────
 // Drives the "characters emerging from the base" intro sequence.
@@ -161,6 +167,10 @@ class SpawnSequencer {
 // ─── Boot ────────────────────────────────────────────────────────────────────
 
 async function boot() {
+  // Register default model providers (procedural primitives).
+  // To swap in glTF models, register overrides after this call.
+  registerDefaultModels();
+
   const canvas = document.getElementById('scene');
   const uiRoot = document.getElementById('ui-root');
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -182,19 +192,19 @@ async function boot() {
   const store = new Store(adapter);
   await store.syncFromAdapter();
 
-  // --- Grid + Terrain ---
+  // --- Grid + Terrain (v2: fan-shaped biome map) ---
   const mapSize = CONFIG.MAP_SIZE;
   const grid = new GameGrid(mapSize, mapSize);
-  const terrainGen = new TerrainGenerator();
-  terrainGen.generate(grid);
+  const biomeTerrainGen = new BiomeTerrainGenerator();
+  const mapInfo = biomeTerrainGen.generate(grid);
 
-  // Place resource nodes from tasks
+  // Place resource nodes from tasks (positioned by biome/stage)
   const tasks = store.getTasks();
-  const resourceNodePositions = terrainGen.placeResourceNodes(grid, tasks);
+  const resourceNodePositions = biomeTerrainGen.placeResourceNodes(grid, tasks);
 
   // Place structures from milestones
   const milestones = store.getMilestones();
-  const structurePositions = terrainGen.placeStructures(grid, milestones);
+  const structurePositions = biomeTerrainGen.placeStructures(grid, milestones);
 
   // --- Map renderer (no textures — flat matte colors) ---
   const gameMap = new GameMap(grid, null);
@@ -202,10 +212,10 @@ async function boot() {
   gameMap.getGroup().position.set(offset.x, 0, offset.z);
   scene.add(gameMap.getGroup());
 
-  // Add resource node visuals
+  // Add resource node visuals (sized by task size)
   for (const node of resourceNodePositions) {
     const color = resourceColorForCategory(node.resourceType);
-    gameMap.addResourceNode(node.taskId, node.col, node.row, color);
+    gameMap.addResourceNode(node.taskId, node.col, node.row, color, node.size || 'medium');
     if (node.depleted) gameMap.setResourceNodeDepleted(node.taskId);
   }
 
@@ -224,12 +234,13 @@ async function boot() {
   fog.getGroup().position.set(offset.x, 0, offset.z);
   scene.add(fog.getGroup());
 
-  // Reveal base area
-  const center = Math.floor(mapSize / 2);
-  fog.revealRadius(center, center, CONFIG.BASE_RADIUS + 8);
+  // Reveal base area (castle is at left side in v2 fan layout)
+  const castleCol = mapInfo.castleCol;
+  const castleRow = mapInfo.castleRow;
+  fog.revealRadius(castleCol, castleRow, CONFIG.BASE_RADIUS + 8);
 
   // --- Base ---
-  const base = new Base(grid, center, center, CONFIG.BASE_RADIUS);
+  const base = new Base(grid, castleCol, castleRow, CONFIG.BASE_RADIUS);
   base.getGroup().position.set(offset.x, 0, offset.z);
   scene.add(base.getGroup());
 
@@ -249,13 +260,13 @@ async function boot() {
     for (let i = -wallExtent; i <= wallExtent; i++) {
       // N/S walls (horizontal): skip gate at dx=0
       if (Math.abs(i) >= gateHalf) {
-        grid.setTile(center + i, center + w, { blocked: true });
-        grid.setTile(center + i, center - w, { blocked: true });
+        grid.setTile(castleCol + i, castleRow + w, { blocked: true });
+        grid.setTile(castleCol + i, castleRow - w, { blocked: true });
       }
       // E/W walls (vertical): skip gate at dz=0
       if (Math.abs(i) >= gateHalf) {
-        grid.setTile(center + w, center + i, { blocked: true });
-        grid.setTile(center - w, center + i, { blocked: true });
+        grid.setTile(castleCol + w, castleRow + i, { blocked: true });
+        grid.setTile(castleCol - w, castleRow + i, { blocked: true });
       }
     }
   }
@@ -263,9 +274,26 @@ async function boot() {
   // Block central keep (2×2 footprint → 3×3 tile area)
   for (let dr = -1; dr <= 1; dr++) {
     for (let dc = -1; dc <= 1; dc++) {
-      grid.setTile(center + dc, center + dr, { blocked: true });
+      grid.setTile(castleCol + dc, castleRow + dr, { blocked: true });
     }
   }
+
+  // --- Castle Evolution (gem treasury + visual upgrades) ---
+  const castleWorldPos = grid.tileToWorld(castleCol, castleRow);
+  const castleEvolution = new CastleEvolution(base, castleWorldPos.x, castleWorldPos.z, CONFIG.BASE_RADIUS);
+  castleEvolution.getGemGroup().position.set(offset.x, 0, offset.z);
+  scene.add(castleEvolution.getGemGroup());
+
+  // Initialize with current completed task count
+  const completedCount = store.getTasks().filter(t => t.percentComplete >= 100).length;
+  castleEvolution.update(completedCount);
+
+  // --- Town Portal (completion animation) ---
+  const castleWorldWithOffset = {
+    x: castleWorldPos.x + offset.x,
+    z: castleWorldPos.z + offset.z,
+  };
+  const townPortal = new TownPortal(scene, castleWorldWithOffset.x, castleWorldWithOffset.z);
 
   // --- Camera controls ---
   const bounds = gameMap.getBounds();
@@ -364,14 +392,17 @@ async function boot() {
     animalManager.update(dt, unitManager.getScenePositions());
     gameMap.update(dt);
     fog.update(dt);
+    castleEvolution.animateGems(dt);
+    townPortal.update(dt);
     if (structurePopup) structurePopup.updatePosition();
+    if (taskPopup) taskPopup.updatePosition();
     sceneManager.render();
   }
 
   requestAnimationFrame(animate);
 
   // --- Interaction ---
-  let raycaster, tooltip, detailPanel, structurePopup, toolbar, editorPanel;
+  let raycaster, tooltip, detailPanel, structurePopup, taskPopup, toolbar, editorPanel;
   try {
     raycaster = new Raycaster(camera, renderer, unitManager, gameMap);
     tooltip = new Tooltip(uiRoot);
@@ -381,6 +412,8 @@ async function boot() {
     detailPanel.setUnitManager(unitManager);
     structurePopup = new StructurePopup(uiRoot, store);
     structurePopup.setCamera(camera);
+    taskPopup = new TaskPopup(uiRoot, store);
+    taskPopup.setCamera(camera);
     toolbar = new Toolbar(uiRoot);
     editorPanel = new EditorPanel(uiRoot, store);
 
@@ -409,16 +442,29 @@ async function boot() {
 
     raycaster.onAvatarClick((personId) => {
       if (structurePopup) structurePopup.close();
+      if (taskPopup) taskPopup.close();
       detailPanel.open(personId);
     });
     raycaster.onStructureClick((milestoneId) => {
+      if (taskPopup) taskPopup.close();
       const pos = gameMap.getStructureWorldPosition(milestoneId);
       if (pos && structurePopup) {
         structurePopup.open(milestoneId, pos.x + offset.x, pos.z + offset.z);
       }
     });
+    raycaster.onResourceClick((taskId) => {
+      if (structurePopup) structurePopup.close();
+      const pos = gameMap.getResourceNodeWorldPosition(taskId);
+      if (pos && taskPopup) {
+        taskPopup.open(taskId, pos.x + offset.x, pos.z + offset.z);
+      }
+    });
     structurePopup.onPersonClick((pid) => {
       structurePopup.close();
+      detailPanel.open(pid);
+    });
+    taskPopup.onPersonClick((pid) => {
+      taskPopup.close();
       detailPanel.open(pid);
     });
 
@@ -434,10 +480,47 @@ async function boot() {
     console.error('[boot] UI init error:', err);
   }
 
+  // Track task stages and completion to detect changes
+  const taskStageCache = new Map();
+  const taskCompletionCache = new Map(); // taskId → boolean (was already 100%?)
+  let gemIndexCounter = completedCount; // for cycling gem colors; start after initial gems
+  for (const task of tasks) {
+    taskStageCache.set(task.id, task.stage || null);
+    taskCompletionCache.set(task.id, (task.percentComplete || 0) >= 100);
+  }
+
+  // --- Health signals (stagnation + deadline) ---
+  const stagnationTracker = new StagnationTracker(CONFIG.STAGNATION_DAYS);
+  stagnationTracker.update(tasks);
+
+  // Apply initial health states to resource nodes
+  const warningDays = CONFIG.DEADLINE_WARNING_DAYS;
+  const workloadCapacity = CONFIG.WORKLOAD_CAPACITY;
+  for (const task of tasks) {
+    const health = classifyTaskHealth(task, stagnationTracker, new Date(), warningDays);
+    gameMap.setResourceNodeHealthState(task.id, health);
+  }
+
+  // Workload tracking (recomputed on every change)
+  let workloadMap = classifyWorkloads(tasks, store.getPeople(), workloadCapacity);
+
+  // Set health/workload providers on UI panels
+  const healthProvider = (taskId) => {
+    const task = store.getTask(taskId);
+    if (!task) return 'healthy';
+    return classifyTaskHealth(task, stagnationTracker, new Date(), warningDays);
+  };
+  const daysInStageProvider = (taskId) => stagnationTracker.daysInStage(taskId);
+  const workloadProvider = (personId) => workloadMap.get(personId) || { state: 'normal', activeCount: 0, capacity: workloadCapacity };
+
+  if (detailPanel) detailPanel.setHealthProviders(healthProvider, workloadProvider);
+  if (taskPopup) taskPopup.setHealthProviders(healthProvider, daysInStageProvider);
+
   store.on('change', () => {
     unitManager.refresh();
     if (detailPanel) detailPanel.refresh();
     if (structurePopup) structurePopup.refresh();
+    if (taskPopup) taskPopup.refresh();
 
     // Update structure progress
     for (const sp of structurePositions) {
@@ -446,6 +529,82 @@ async function boot() {
         const progress = computeStructureProgress(ms, store.getTasks());
         gameMap.setStructureProgress(sp.milestoneId, progress);
       }
+    }
+
+    // Detect newly completed tasks → trigger town portal animation
+    for (const task of store.getTasks()) {
+      const wasComplete = taskCompletionCache.get(task.id) || false;
+      const isComplete = (task.percentComplete || 0) >= 100;
+
+      if (isComplete && !wasComplete && !townPortal.isActive(task.id)) {
+        // Get the marker's world position (accounting for scene offset)
+        const nodePos = gameMap.getResourceNodeWorldPosition(task.id);
+        if (nodePos) {
+          const worldX = nodePos.x + offset.x;
+          const worldZ = nodePos.z + offset.z;
+          const gemIdx = gemIndexCounter++;
+
+          townPortal.trigger(
+            task.id,
+            worldX,
+            worldZ,
+            gemIdx,
+            // onMarkerHide — permanently deplete the resource node
+            () => {
+              gameMap.depleteNode(task.id, /* permanent */ true);
+            },
+            // onComplete — gem has arrived at castle; update evolution + remove marker
+            () => {
+              gameMap.removeResourceNode(task.id);
+              // Recount completed tasks (including this one) for castle evolution
+              const currentCompleted = store.getTasks().filter(t => (t.percentComplete || 0) >= 100).length;
+              castleEvolution.update(currentCompleted);
+            }
+          );
+        }
+      }
+      taskCompletionCache.set(task.id, isComplete);
+    }
+
+    // Update castle evolution for non-portal tasks (tasks that were already
+    // complete at load time, or completed tasks whose portal has finished).
+    // Portal-active tasks will update the castle when their flight completes.
+    if (townPortal.activeCount === 0) {
+      const newCompletedCount = store.getTasks().filter(t => (t.percentComplete || 0) >= 100).length;
+      castleEvolution.update(newCompletedCount);
+    }
+
+    // Detect task stage changes and relocate resource nodes to new biome
+    for (const task of store.getTasks()) {
+      const prevStage = taskStageCache.get(task.id);
+      const newStage = task.stage || null;
+      if (prevStage !== newStage && newStage) {
+        // Don't relocate completed/portal-active tasks
+        if ((task.percentComplete || 0) >= 100 || townPortal.isActive(task.id)) {
+          taskStageCache.set(task.id, newStage);
+          continue;
+        }
+        // Recalculate position for the new biome
+        const newPositions = biomeTerrainGen.placeResourceNodes(grid, [task]);
+        if (newPositions.length > 0) {
+          const np = newPositions[0];
+          gameMap.relocateResourceNode(task.id, np.col, np.row);
+          // Update unit manager's resource positions
+          unitManager.setResourceNodePositions([{ taskId: task.id, col: np.col, row: np.row }]);
+        }
+      }
+      taskStageCache.set(task.id, newStage);
+    }
+
+    // Recompute health signals for all active tasks
+    const currentTasks = store.getTasks();
+    stagnationTracker.update(currentTasks);
+    workloadMap = classifyWorkloads(currentTasks, store.getPeople(), workloadCapacity);
+    const now = new Date();
+    for (const task of currentTasks) {
+      if ((task.percentComplete || 0) >= 100 || townPortal.isActive(task.id)) continue;
+      const health = classifyTaskHealth(task, stagnationTracker, now, warningDays);
+      gameMap.setResourceNodeHealthState(task.id, health);
     }
   });
 

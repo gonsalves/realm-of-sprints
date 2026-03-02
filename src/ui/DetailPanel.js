@@ -6,11 +6,33 @@ function deriveEmail(name, domain) {
   return name.trim().toLowerCase().replace(/\s+/g, '.') + '@' + domain;
 }
 
+// Stage display names and colors (shared with TaskPopup)
+const STAGE_DISPLAY = {
+  planning:     { label: 'Planning',     color: '#A0AAB8' },
+  ideating:     { label: 'Ideating',     color: '#C4A0E8' },
+  exploration:  { label: 'Exploration',  color: '#5BA4CF' },
+  building:     { label: 'Building',     color: '#E8A040' },
+  documenting:  { label: 'Documenting',  color: '#8A9A7C' },
+  sharing:      { label: 'Sharing',      color: '#C0B090' },
+  presenting:   { label: 'Presenting',   color: '#E86040' },
+};
+
+const HEALTH_DISPLAY = {
+  healthy:  { label: 'On Track',  color: '#8A9A7C' },
+  stagnant: { label: 'Stagnant',  color: '#A0AAB8' },
+  atRisk:   { label: 'At Risk',   color: '#E8A040' },
+  overdue:  { label: 'Overdue',   color: '#CC5544' },
+};
+
 export class DetailPanel {
   constructor(container, store) {
     this.store = store;
     this.personId = null;
     this._unitManagerRef = null;
+
+    // Health/workload providers (set externally)
+    this._healthProvider = null;      // (taskId) => 'healthy'|'stagnant'|'atRisk'|'overdue'
+    this._workloadProvider = null;    // (personId) => { state, activeCount, capacity }
 
     this.el = document.createElement('div');
     this.el.className = 'detail-panel';
@@ -19,6 +41,16 @@ export class DetailPanel {
 
   setUnitManager(unitManager) {
     this._unitManagerRef = unitManager;
+  }
+
+  /**
+   * Set providers for health and workload data.
+   * @param {Function} healthFn — (taskId) => HealthState string
+   * @param {Function} workloadFn — (personId) => { state, activeCount, capacity }
+   */
+  setHealthProviders(healthFn, workloadFn) {
+    this._healthProvider = healthFn;
+    this._workloadProvider = workloadFn;
   }
 
   open(personId) {
@@ -60,6 +92,13 @@ export class DetailPanel {
       if (sm) activityLabel = sm.getLabel();
     }
 
+    // Workload
+    const workload = this._workloadProvider ? this._workloadProvider(this.personId) : null;
+    const workloadHtml = workload ? this._renderWorkload(workload) : '';
+
+    // Health summary — count flagged tasks
+    const healthSummary = this._computeHealthSummary(tasks);
+
     // Action button data
     const email = deriveEmail(person.name, CONFIG.EMAIL_DOMAIN);
     const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE`
@@ -86,6 +125,10 @@ export class DetailPanel {
           ${activityLabel}
         </div>
       </div>
+
+      ${workloadHtml}
+
+      ${healthSummary}
 
       <div class="detail-section">
         <div class="detail-section-title">Actions</div>
@@ -153,7 +196,7 @@ export class DetailPanel {
       </div>
 
       <div class="detail-section">
-        <div class="detail-section-title">Resources (${tasks.length})</div>
+        <div class="detail-section-title">Tasks (${tasks.length})</div>
         ${tasks.map(task => this._renderTask(task, breakdown)).join('')}
         ${tasks.length === 0 ? '<div style="color:#666;font-size:12px;">No tasks assigned</div>' : ''}
       </div>
@@ -172,6 +215,55 @@ export class DetailPanel {
     }
   }
 
+  _renderWorkload(workload) {
+    const isOverloaded = workload.state === 'overloaded';
+    const barPct = Math.min(100, Math.round((workload.activeCount / workload.capacity) * 100));
+    const barColor = isOverloaded ? '#CC5544' : barPct > 75 ? '#E8A040' : '#8A9A7C';
+
+    return `
+      <div class="detail-section">
+        <div class="detail-section-title">Workload</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="font-size:13px;color:#E8E4DC;">${workload.activeCount} / ${workload.capacity} tasks</span>
+          ${isOverloaded ? '<span style="font-size:11px;color:#CC5544;font-weight:600;">OVERLOADED</span>' : ''}
+        </div>
+        <div class="energy-bar-container" style="height:6px;">
+          <div class="energy-bar-fill" style="width:${barPct}%;background:${barColor};"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  _computeHealthSummary(tasks) {
+    if (!this._healthProvider) return '';
+
+    const flagged = [];
+    for (const task of tasks) {
+      if ((task.percentComplete || 0) >= 100) continue;
+      const health = this._healthProvider(task.id);
+      if (health !== 'healthy') {
+        const info = HEALTH_DISPLAY[health] || HEALTH_DISPLAY.healthy;
+        flagged.push({ task, health, info });
+      }
+    }
+
+    if (flagged.length === 0) return '';
+
+    return `
+      <div class="detail-section">
+        <div class="detail-section-title">Health Alerts (${flagged.length})</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          ${flagged.map(f => `
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:rgba(255,255,255,0.03);border-radius:4px;border-left:2px solid ${f.info.color};">
+              <span style="font-size:11px;font-weight:600;color:${f.info.color};">${f.info.label}</span>
+              <span style="font-size:11px;color:#D0C8B8;flex:1;">${f.task.name}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   _renderTask(task, breakdown) {
     const taskBreakdown = breakdown.perTask.find(t => t.taskId === task.id);
     const daysUntilDue = taskBreakdown ? taskBreakdown.daysUntilDue : null;
@@ -188,17 +280,32 @@ export class DetailPanel {
       ? `<span style="background:rgba(160,170,184,0.12);color:#A0AAB8;padding:2px 6px;border-radius:4px;font-size:10px;">${task.category}</span>`
       : '';
 
+    // Stage badge
+    const stageInfo = STAGE_DISPLAY[task.stage] || null;
+    const stageBadge = stageInfo
+      ? `<span style="background:${stageInfo.color}22;color:${stageInfo.color};padding:2px 6px;border-radius:4px;font-size:10px;border:1px solid ${stageInfo.color}33;">${stageInfo.label}</span>`
+      : '';
+
+    // Health indicator dot
+    const health = this._healthProvider ? this._healthProvider(task.id) : 'healthy';
+    const healthInfo = HEALTH_DISPLAY[health] || HEALTH_DISPLAY.healthy;
+    const healthDot = health !== 'healthy'
+      ? `<span style="width:6px;height:6px;border-radius:50%;background:${healthInfo.color};flex-shrink:0;" title="${healthInfo.label}"></span>`
+      : '';
+
+    // Size label
+    const sizeLabel = task.size ? task.size.charAt(0).toUpperCase() : '';
+
     return `
       <div class="task-item">
-        <div style="display:flex;align-items:center;gap:6px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${healthDot}
           <div class="task-name">${task.name}</div>
+          ${stageBadge}
           ${categoryBadge}
+          ${sizeLabel ? `<span style="background:rgba(255,255,255,0.06);color:#888;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;">${sizeLabel}</span>` : ''}
         </div>
         ${task.description ? `<div class="task-desc">${task.description}</div>` : ''}
-        <div class="task-phase-bar">
-          <div class="task-phase-discovery" style="width:${task.discoveryPercent}%;"></div>
-          <div class="task-phase-execution" style="width:${task.executionPercent}%;"></div>
-        </div>
         <div class="task-progress">
           <div class="task-progress-fill" style="width:${task.percentComplete}%;"></div>
         </div>

@@ -153,6 +153,8 @@ export class Store {
       description: task.description || '',
       assigneeId: task.assigneeId,
       category: task.category || '',
+      stage: task.stage || 'planning',
+      size: task.size || 'medium',
       discoveryPercent: task.discoveryPercent ?? 50,
       executionPercent: task.executionPercent ?? 50,
       expectedDate: task.expectedDate || new Date().toISOString().split('T')[0],

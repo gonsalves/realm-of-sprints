@@ -14,6 +14,8 @@
  * @property {string} [description]
  * @property {string} assigneeId
  * @property {string} [category]       - becomes resource type
+ * @property {string} [stage]          - work stage: planning, ideating, exploration, building, documenting, sharing, presenting
+ * @property {string} [size]           - task size: small, medium, large
  * @property {number} discoveryPercent  - 0–100
  * @property {number} executionPercent  - 0–100
  * @property {number} percentComplete   - 0–100

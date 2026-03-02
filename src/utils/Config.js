@@ -16,4 +16,17 @@ export const CONFIG = {
   // Unit sight
   SCOUT_SIGHT_RADIUS: 3,
   GATHER_SIGHT_RADIUS: 1,
+
+  // Health signals
+  DEADLINE_WARNING_DAYS: 3,       // days before deadline → "at risk"
+  WORKLOAD_CAPACITY: 3,           // max active tasks per person before overload
+  STAGNATION_DAYS: {              // per-stage days before flagging stagnation
+    planning: 5,
+    ideating: 5,
+    exploration: 7,
+    building: 10,
+    documenting: 5,
+    sharing: 3,
+    presenting: 3,
+  },
 };
