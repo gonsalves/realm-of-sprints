@@ -12,9 +12,8 @@ export class Raycaster {
     this._avatarClickCallbacks = [];
     this._avatarHoverCallbacks = [];
     this._resourceClickCallbacks = [];
-    this._structureClickCallbacks = [];
     this._hoveredId = null;
-    this._hoveredType = null; // 'avatar' | 'resource' | 'structure'
+    this._hoveredType = null; // 'avatar' | 'resource'
 
     const canvas = renderer.domElement;
     canvas.addEventListener('click', (e) => this._onClick(e));
@@ -30,8 +29,7 @@ export class Raycaster {
   _getAllPickables() {
     const avatarPicks = this.unitManager.getPickableObjects();
     const resourcePicks = this.gameMap ? this.gameMap.getResourceNodePickables() : [];
-    const structurePicks = this.gameMap ? this.gameMap.getStructurePickables() : [];
-    return [...avatarPicks, ...resourcePicks, ...structurePicks];
+    return [...avatarPicks, ...resourcePicks];
   }
 
   _raycast() {
@@ -44,7 +42,6 @@ export class Raycaster {
     const obj = hit.object;
     if (obj.userData.personId) return { type: 'avatar', id: obj.userData.personId };
     if (obj.userData.taskId && obj.userData.isResourceNode) return { type: 'resource', id: obj.userData.taskId };
-    if (obj.userData.milestoneId && obj.userData.isStructure) return { type: 'structure', id: obj.userData.milestoneId };
     return null;
   }
 
@@ -62,8 +59,6 @@ export class Raycaster {
         for (const cb of this._avatarClickCallbacks) cb(info.id);
       } else if (info.type === 'resource') {
         for (const cb of this._resourceClickCallbacks) cb(info.id);
-      } else if (info.type === 'structure') {
-        for (const cb of this._structureClickCallbacks) cb(info.id);
       }
     }
   }
@@ -130,5 +125,4 @@ export class Raycaster {
   onAvatarClick(cb) { this._avatarClickCallbacks.push(cb); }
   onAvatarHover(cb) { this._avatarHoverCallbacks.push(cb); }
   onResourceClick(cb) { this._resourceClickCallbacks.push(cb); }
-  onStructureClick(cb) { this._structureClickCallbacks.push(cb); }
 }

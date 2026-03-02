@@ -379,7 +379,7 @@ export class UnitManager {
   }
 
   _handleScouting(unit, dt, personId, unitIdx) {
-    const speed = computeScoutSpeed(this.store.getTasksForPerson(personId)) * 3.0;
+    const speed = computeScoutSpeed(this.store.getTasksForPerson(personId)) * 1.2;
     this._handleMovement(unit, dt, speed, unitIdx);
   }
 

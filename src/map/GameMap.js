@@ -38,9 +38,6 @@ export class GameMap {
     this.group = new THREE.Group();
     this._tileMeshes = new Map();
     this._resourceNodeGroups = new Map();
-    this._structureGroups = new Map();
-    this._structureLanterns = new Map(); // milestoneId → { light, mesh }
-    this._structureProgress = new Map(); // milestoneId → progress (0-1)
     this._nodeAnimState = new Map(); // taskId → { phase, timer, permanent }
     this._nodeHealthState = new Map(); // taskId → 'healthy'|'stagnant'|'atRisk'|'overdue'
     this._textures = textures;
@@ -136,11 +133,11 @@ export class GameMap {
   }
 
   /**
-   * Add a resource node visual for a task.
+   * Add a task flag visual.
    * @param {string} taskId
    * @param {number} col
    * @param {number} row
-   * @param {number} color
+   * @param {number} color — flag cloth color
    * @param {string} [size='medium'] — 'small', 'medium', or 'large'
    */
   addResourceNode(taskId, col, row, color, size = 'medium') {
@@ -149,34 +146,40 @@ export class GameMap {
 
     // Scale factor based on task size
     const sizeScale = size === 'large' ? 1.5 : size === 'small' ? 0.65 : 1.0;
+    const poleHeight = 0.8 * sizeScale;
 
-    // Abstract geometric marker — icosahedron on pedestal
-    const markerGeo = new THREE.IcosahedronGeometry(0.18 * sizeScale, 0);
-    const markerMat = new THREE.MeshStandardMaterial({
-      color: THEME.resourceNodes.marker.color,
-      roughness: THEME.resourceNodes.marker.roughness,
-      metalness: THEME.resourceNodes.marker.metalness,
+    // Flag pole (thin cylinder)
+    const poleGeo = new THREE.CylinderGeometry(0.02, 0.02, poleHeight, 6);
+    const poleMat = new THREE.MeshStandardMaterial({
+      color: 0x8b7355,
+      roughness: 0.8,
+      metalness: 0.1,
     });
-    const marker = new THREE.Mesh(markerGeo, markerMat);
-    marker.position.set(world.x, 0.35 * sizeScale, world.z);
-    marker.castShadow = true;
-    marker.userData.taskId = taskId;
-    marker.userData.isResourceNode = true;
-    marker.userData.size = size;
-    nodeGroup.add(marker);
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.set(world.x, poleHeight / 2, world.z);
+    pole.castShadow = true;
+    nodeGroup.add(pole);
 
-    // Pedestal scales with marker
-    const pedestalGeo = new THREE.CylinderGeometry(0.12 * sizeScale, 0.14 * sizeScale, 0.15 * sizeScale, 6);
-    const pedestalMat = new THREE.MeshStandardMaterial({
-      color: THEME.resourceNodes.pedestal.color,
-      roughness: THEME.resourceNodes.pedestal.roughness,
-      metalness: THEME.resourceNodes.pedestal.metalness,
+    // Flag cloth (flat plane hanging from top of pole)
+    const flagWidth = 0.3 * sizeScale;
+    const flagHeight = 0.2 * sizeScale;
+    const flagGeo = new THREE.PlaneGeometry(flagWidth, flagHeight);
+    const flagMat = new THREE.MeshStandardMaterial({
+      color: color,
+      roughness: 0.6,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
     });
-    const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
-    pedestal.position.set(world.x, 0.075 * sizeScale, world.z);
-    pedestal.castShadow = true;
-    pedestal.receiveShadow = true;
-    nodeGroup.add(pedestal);
+    const flag = new THREE.Mesh(flagGeo, flagMat);
+    // Position at top of pole, offset to the right so it hangs off the pole
+    flag.position.set(world.x + flagWidth / 2 + 0.02, poleHeight - flagHeight / 2, world.z);
+    flag.castShadow = true;
+    flag.userData.taskId = taskId;
+    flag.userData.isResourceNode = true;
+    flag.userData.size = size;
+    flag.userData.originalColor = color;
+    flag.userData.flagOffsetX = flagWidth / 2 + 0.02;
+    nodeGroup.add(flag);
 
     nodeGroup.visible = false;
     this.group.add(nodeGroup);
@@ -206,11 +209,12 @@ export class GameMap {
     group.traverse(child => {
       if (child.isMesh) {
         if (child.userData.isResourceNode) {
-          // Marker — reposition to new world coords, keep Y
-          child.position.x = world.x;
+          // Flag cloth — offset from pole
+          const flagOffsetX = child.userData.flagOffsetX || 0;
+          child.position.x = world.x + flagOffsetX;
           child.position.z = world.z;
         } else {
-          // Pedestal
+          // Pole
           child.position.x = world.x;
           child.position.z = world.z;
         }
@@ -346,8 +350,8 @@ export class GameMap {
             break;
           }
           default: {
-            // healthy — restore normal appearance
-            child.material.color.set(THEME.resourceNodes.marker.color);
+            // healthy — restore original task color
+            child.material.color.set(child.userData.originalColor || THEME.resourceNodes.marker.color);
             child.material.emissive.set(0x000000);
             child.material.emissiveIntensity = 0;
             child.material.opacity = 1;
@@ -377,229 +381,18 @@ export class GameMap {
     group.traverse(child => {
       if (child.isMesh && child.material) {
         if (child.userData.isResourceNode) {
-          // Marker — restore original color
-          child.material.color.set(THEME.resourceNodes.marker.color);
+          // Flag cloth — restore original task color
+          child.material.color.set(child.userData.originalColor || THEME.resourceNodes.marker.color);
           child.material.opacity = 1;
           child.material.transparent = false;
         } else {
-          // Pedestal
-          child.material.color.set(THEME.resourceNodes.pedestal.color);
+          // Pole — restore brown
+          child.material.color.set(0x8b7355);
           child.material.opacity = 1;
           child.material.transparent = false;
         }
       }
     });
-  }
-
-  addStructure(milestoneId, col, row) {
-    const world = this.grid.tileToWorld(col, row);
-    const structGroup = new THREE.Group();
-    const S = THEME.structures.stages;
-
-    // Base ring
-    const ringGeo = new THREE.RingGeometry(0.6, 1.0, 16);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: THEME.structures.base.color,
-      transparent: true,
-      opacity: THEME.structures.base.opacity,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.set(world.x, 0.01, world.z);
-    ring.receiveShadow = true;
-    structGroup.add(ring);
-
-    // Foundation platform
-    const foundGeo = new THREE.CylinderGeometry(0.7, 0.8, 0.1, 8);
-    const foundMat = new THREE.MeshStandardMaterial({
-      color: S.foundation.color,
-      roughness: S.foundation.roughness,
-      metalness: S.foundation.metalness,
-    });
-    const foundation = new THREE.Mesh(foundGeo, foundMat);
-    foundation.position.set(world.x, 0.05, world.z);
-    foundation.receiveShadow = true;
-    structGroup.add(foundation);
-
-    // Wireframe blueprint (walls + roof outline)
-    const wireGroup = new THREE.Group();
-    const wireWallGeo = new THREE.BoxGeometry(1.0, 0.8, 1.0);
-    const wireMat = new THREE.MeshStandardMaterial({
-      color: THEME.structures.wireframe.color,
-      wireframe: true,
-      transparent: true,
-      opacity: THEME.structures.wireframe.opacity,
-    });
-    const wireWall = new THREE.Mesh(wireWallGeo, wireMat);
-    wireWall.position.set(world.x, 0.5, world.z);
-    wireWall.userData.milestoneId = milestoneId;
-    wireWall.userData.isStructure = true;
-    wireGroup.add(wireWall);
-
-    const wireRoofGeo = new THREE.ConeGeometry(0.75, 0.5, 4);
-    const wireRoof = new THREE.Mesh(wireRoofGeo, wireMat.clone());
-    wireRoof.position.set(world.x, 1.15, world.z);
-    wireRoof.rotation.y = Math.PI / 4;
-    wireGroup.add(wireRoof);
-    structGroup.add(wireGroup);
-
-    // Solid walls
-    const wallGeo = new THREE.BoxGeometry(1.0, 0.8, 1.0);
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: S.walls.color,
-      roughness: S.walls.roughness,
-      metalness: S.walls.metalness,
-      transparent: true,
-      opacity: 0,
-    });
-    const walls = new THREE.Mesh(wallGeo, wallMat);
-    walls.position.set(world.x, 0.5, world.z);
-    walls.castShadow = true;
-    walls.receiveShadow = true;
-    walls.userData.milestoneId = milestoneId;
-    walls.userData.isStructure = true;
-    structGroup.add(walls);
-
-    // Roof (cone, 4-sided pyramid)
-    const roofGeo = new THREE.ConeGeometry(0.75, 0.5, 4);
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: S.roof.color,
-      roughness: S.roof.roughness,
-      metalness: S.roof.metalness,
-      transparent: true,
-      opacity: 0,
-      flatShading: true,
-    });
-    const roof = new THREE.Mesh(roofGeo, roofMat);
-    roof.position.set(world.x, 1.15, world.z);
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    structGroup.add(roof);
-
-    // Door (small box on front face)
-    const doorGeo = new THREE.BoxGeometry(0.2, 0.35, 0.06);
-    const doorMat = new THREE.MeshStandardMaterial({
-      color: S.door.color,
-      roughness: S.door.roughness,
-      metalness: S.door.metalness,
-      transparent: true,
-      opacity: 0,
-    });
-    const door = new THREE.Mesh(doorGeo, doorMat);
-    door.position.set(world.x, 0.28, world.z + 0.52);
-    door.castShadow = true;
-    structGroup.add(door);
-
-    // Lantern (PointLight + small emissive mesh, hidden until night)
-    const L = THEME.lantern;
-    const lanternLight = new THREE.PointLight(
-      L.structure.color, 0, L.structure.range, L.structure.decay
-    );
-    lanternLight.position.set(world.x, 1.8, world.z);
-    lanternLight.castShadow = false;
-    structGroup.add(lanternLight);
-
-    const lanternGeo = new THREE.BoxGeometry(0.1, 0.15, 0.1);
-    const lanternMat = new THREE.MeshStandardMaterial({
-      color: L.mesh.color,
-      emissive: L.mesh.emissive,
-      emissiveIntensity: 0,
-    });
-    const lanternMesh = new THREE.Mesh(lanternGeo, lanternMat);
-    lanternMesh.position.set(world.x, 1.6, world.z);
-    lanternMesh.visible = false;
-    structGroup.add(lanternMesh);
-
-    this._structureLanterns.set(milestoneId, {
-      light: lanternLight,
-      mesh: lanternMesh,
-      maxIntensity: L.structure.intensity,
-    });
-
-    // Store refs for animation
-    structGroup.userData = {
-      _wireGroup: wireGroup,
-      _walls: walls,
-      _roof: roof,
-      _door: door,
-      _foundation: foundation,
-      _wx: world.x,
-      _wz: world.z,
-    };
-
-    this.group.add(structGroup);
-    this._structureGroups.set(milestoneId, structGroup);
-    return structGroup;
-  }
-
-  setStructureProgress(milestoneId, progress) {
-    this._structureProgress.set(milestoneId, progress);
-    const group = this._structureGroups.get(milestoneId);
-    if (!group) return;
-    const d = group.userData;
-    const wireGroup = d._wireGroup;
-    const walls = d._walls;
-    const roof = d._roof;
-    const door = d._door;
-
-    // Wireframe fades as progress increases
-    wireGroup.traverse(child => {
-      if (child.isMesh && child.material) {
-        child.material.opacity = THEME.structures.wireframe.opacity * (1 - progress);
-      }
-    });
-
-    // Stage 1: 0-25% — Foundation + wireframe only
-    if (progress < 0.25) {
-      walls.material.opacity = 0;
-      walls.scale.y = 0.01;
-      roof.material.opacity = 0;
-      door.material.opacity = 0;
-      return;
-    }
-
-    // Stage 2: 25-50% — Walls rising
-    if (progress < 0.5) {
-      const t = (progress - 0.25) / 0.25; // 0→1 within stage
-      walls.material.opacity = 0.3 + t * 0.5;
-      walls.scale.y = 0.2 + t * 0.8;
-      walls.position.y = 0.5 * walls.scale.y;
-      roof.material.opacity = 0;
-      door.material.opacity = 0;
-      return;
-    }
-
-    // Stage 3: 50-75% — Walls complete, roof appearing
-    if (progress < 0.75) {
-      const t = (progress - 0.5) / 0.25;
-      walls.material.opacity = 0.8 + t * 0.2;
-      walls.scale.y = 1;
-      walls.position.y = 0.5;
-      roof.material.opacity = t * 0.9;
-      roof.scale.set(t, t, t);
-      roof.position.y = 0.9 + t * 0.25;
-      door.material.opacity = 0;
-      return;
-    }
-
-    // Stage 4: 75-100% — Door and details appear
-    const t = (progress - 0.75) / 0.25;
-    walls.material.opacity = 1;
-    walls.scale.y = 1;
-    walls.position.y = 0.5;
-    roof.material.opacity = 0.9 + t * 0.1;
-    roof.scale.set(1, 1, 1);
-    roof.position.y = 1.15;
-    door.material.opacity = t;
-
-    // At 100%: golden completion glow
-    if (progress >= 1) {
-      walls.material.color.set(THEME.structures.complete.color);
-      walls.material.emissive = new THREE.Color(THEME.structures.complete.emissiveColor);
-      walls.material.emissiveIntensity = THEME.structures.complete.emissiveIntensity;
-      roof.material.emissive = new THREE.Color(THEME.structures.complete.emissiveColor);
-      roof.material.emissiveIntensity = THEME.structures.complete.emissiveIntensity * 0.5;
-    }
   }
 
   getResourceNodePickables() {
@@ -615,44 +408,6 @@ export class GameMap {
     return pickables;
   }
 
-  getStructureWorldPosition(milestoneId) {
-    const group = this._structureGroups.get(milestoneId);
-    if (!group) return null;
-    return { x: group.userData._wx, z: group.userData._wz };
-  }
-
-  getStructurePickables() {
-    const pickables = [];
-    for (const group of this._structureGroups.values()) {
-      group.traverse(child => {
-        if (child.isMesh && child.userData.isStructure) {
-          pickables.push(child);
-        }
-      });
-    }
-    return pickables;
-  }
-
-  /**
-   * Update structure lanterns for day/night cycle.
-   * @param {number} t — 0 = day, 1 = night
-   */
-  setTimeOfDay(t) {
-    const fadeStart = THEME.lantern.fadeStart;
-    const raw = Math.max(0, Math.min(1, (t - fadeStart) / (1 - fadeStart)));
-    const fade = raw * raw * (3 - 2 * raw); // smoothstep
-
-    for (const [milestoneId, lantern] of this._structureLanterns) {
-      // Only illuminate structures with roof built (progress >= 50%)
-      const progress = this._structureProgress.get(milestoneId) || 0;
-      const active = progress >= 0.5 ? fade : 0;
-
-      lantern.light.intensity = lantern.maxIntensity * active;
-      lantern.mesh.material.emissiveIntensity = active * 0.8;
-      lantern.mesh.visible = active > 0;
-    }
-  }
-
   update(dt) {
     this._time += dt;
 
@@ -665,11 +420,10 @@ export class GameMap {
       group.traverse(child => {
         if (!child.isMesh || !child.userData.isResourceNode) return;
 
-        // Rotation speed depends on health
-        const rotSpeed = health === 'stagnant'
-          ? (healthTheme.stagnant.rotationSpeed || 0.15)
-          : 0.5;
-        child.rotation.y += dt * rotSpeed;
+        // Gentle flag sway (oscillate rotation around Z axis)
+        const swaySpeed = health === 'stagnant' ? 0.5 : 1.5;
+        const swayAmount = health === 'stagnant' ? 0.03 : 0.08;
+        child.rotation.z = Math.sin(this._time * swaySpeed + child.position.x * 3) * swayAmount;
 
         // Emissive pulsing for atRisk/overdue
         if (health === 'atRisk') {

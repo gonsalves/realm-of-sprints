@@ -10,17 +10,14 @@ import { GameMap } from './map/GameMap.js';
 import { FogOfWar } from './map/FogOfWar.js';
 import { Base } from './map/Base.js';
 import { UnitManager } from './units/UnitManager.js';
-import { AnimalManager } from './units/AnimalManager.js';
 import { Raycaster } from './interaction/Raycaster.js';
 import { Tooltip } from './interaction/Tooltip.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { EditorPanel } from './ui/EditorPanel.js';
 import { SettingsPanel } from './ui/SettingsPanel.js';
 import { DetailPanel } from './ui/DetailPanel.js';
-import { StructurePopup } from './ui/StructurePopup.js';
 import { CONFIG } from './utils/Config.js';
 import { resourceColorForCategory } from './utils/Colors.js';
-import { computeStructureProgress } from './data/ResourceCalculator.js';
 import { THEME, THEME_NIGHT } from './utils/Theme.js';
 import { registerDefaultModels } from './models/registerDefaultModels.js';
 import { CastleEvolution } from './map/CastleEvolution.js';
@@ -202,10 +199,6 @@ async function boot() {
   const tasks = store.getTasks();
   const resourceNodePositions = biomeTerrainGen.placeResourceNodes(grid, tasks);
 
-  // Place structures from milestones
-  const milestones = store.getMilestones();
-  const structurePositions = biomeTerrainGen.placeStructures(grid, milestones);
-
   // --- Map renderer (no textures — flat matte colors) ---
   const gameMap = new GameMap(grid, null);
   const offset = gameMap.centerOffset();
@@ -217,16 +210,6 @@ async function boot() {
     const color = resourceColorForCategory(node.resourceType);
     gameMap.addResourceNode(node.taskId, node.col, node.row, color, node.size || 'medium');
     if (node.depleted) gameMap.setResourceNodeDepleted(node.taskId);
-  }
-
-  // Add structure visuals
-  for (const sp of structurePositions) {
-    const ms = store.getMilestone(sp.milestoneId);
-    gameMap.addStructure(sp.milestoneId, sp.col, sp.row);
-    if (ms) {
-      const progress = computeStructureProgress(ms, store.getTasks());
-      gameMap.setStructureProgress(sp.milestoneId, progress);
-    }
   }
 
   // --- Fog of War ---
@@ -323,30 +306,17 @@ async function boot() {
   unitManager.setCamera(camera);
   unitManager.setWorldOffset(offset);
   unitManager.setResourceNodePositions(resourceNodePositions);
-  unitManager.setStructurePositions(structurePositions);
   unitManager.refresh();
-
-  // --- Animals (all start hidden — spawn sequencer reveals them) ---
-  const animalManager = new AnimalManager(scene, grid, offset);
-  animalManager.setDoorExitPositions(base.getDoorExitPositions());
-  animalManager.spawn(); // 5-8 random cats, dogs, penguins
 
   // --- Spawn Sequencer ---
   const spawnSequencer = new SpawnSequencer(base, offset);
 
-  // Queue people first, then animals
+  // Queue people
   const avatarList = unitManager.getAvatarList();
   for (const { personId, avatar } of avatarList) {
     spawnSequencer.addEntity(avatar.group, () => {
       unitManager.markSpawned(personId);
     }, 'person');
-  }
-
-  const animalList = animalManager.getAnimalList();
-  for (const { index, group } of animalList) {
-    spawnSequencer.addEntity(group, () => {
-      animalManager.markSpawned(index);
-    }, 'animal');
   }
 
   // --- Day/Night continuous 24-hour cycle ---
@@ -367,7 +337,6 @@ async function boot() {
     sceneManager.setTimeOfDay(t);
     unitManager.setTimeOfDay(t);
     base.setTimeOfDay(t);
-    gameMap.setTimeOfDay(t);
 
     // Fog color interpolation
     const dFog = THEME.fog.color;
@@ -400,12 +369,10 @@ async function boot() {
     }
 
     unitManager.update(dt);
-    animalManager.update(dt, unitManager.getScenePositions());
     gameMap.update(dt);
     fog.update(dt);
     castleEvolution.animateGems(dt);
     townPortal.update(dt);
-    if (structurePopup) structurePopup.updatePosition();
     if (taskPopup) taskPopup.updatePosition();
     sceneManager.render();
   }
@@ -413,7 +380,7 @@ async function boot() {
   requestAnimationFrame(animate);
 
   // --- Interaction ---
-  let raycaster, tooltip, detailPanel, structurePopup, taskPopup, toolbar, editorPanel;
+  let raycaster, tooltip, detailPanel, taskPopup, toolbar, editorPanel;
   try {
     raycaster = new Raycaster(camera, renderer, unitManager, gameMap);
     tooltip = new Tooltip(uiRoot);
@@ -421,8 +388,6 @@ async function boot() {
     // --- UI ---
     detailPanel = new DetailPanel(uiRoot, store);
     detailPanel.setUnitManager(unitManager);
-    structurePopup = new StructurePopup(uiRoot, store);
-    structurePopup.setCamera(camera);
     taskPopup = new TaskPopup(uiRoot, store);
     taskPopup.setCamera(camera);
     toolbar = new Toolbar(uiRoot);
@@ -452,27 +417,14 @@ async function boot() {
     toolbar.onToggleEditor(() => editorPanel.toggle());
 
     raycaster.onAvatarClick((personId) => {
-      if (structurePopup) structurePopup.close();
       if (taskPopup) taskPopup.close();
       detailPanel.open(personId);
     });
-    raycaster.onStructureClick((milestoneId) => {
-      if (taskPopup) taskPopup.close();
-      const pos = gameMap.getStructureWorldPosition(milestoneId);
-      if (pos && structurePopup) {
-        structurePopup.open(milestoneId, pos.x + offset.x, pos.z + offset.z);
-      }
-    });
     raycaster.onResourceClick((taskId) => {
-      if (structurePopup) structurePopup.close();
       const pos = gameMap.getResourceNodeWorldPosition(taskId);
       if (pos && taskPopup) {
         taskPopup.open(taskId, pos.x + offset.x, pos.z + offset.z);
       }
-    });
-    structurePopup.onPersonClick((pid) => {
-      structurePopup.close();
-      detailPanel.open(pid);
     });
     taskPopup.onPersonClick((pid) => {
       taskPopup.close();
@@ -530,17 +482,7 @@ async function boot() {
   store.on('change', () => {
     unitManager.refresh();
     if (detailPanel) detailPanel.refresh();
-    if (structurePopup) structurePopup.refresh();
     if (taskPopup) taskPopup.refresh();
-
-    // Update structure progress
-    for (const sp of structurePositions) {
-      const ms = store.getMilestone(sp.milestoneId);
-      if (ms) {
-        const progress = computeStructureProgress(ms, store.getTasks());
-        gameMap.setStructureProgress(sp.milestoneId, progress);
-      }
-    }
 
     // Detect newly completed tasks → trigger town portal animation
     for (const task of store.getTasks()) {
