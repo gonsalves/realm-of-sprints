@@ -143,12 +143,14 @@ export class GameMap {
   addResourceNode(taskId, col, row, color, size = 'medium') {
     const world = this.grid.tileToWorld(col, row);
     const nodeGroup = new THREE.Group();
+    // Position group at world coords so scale/wobble animates around flag center
+    nodeGroup.position.set(world.x, 0, world.z);
 
     // Scale factor based on task size
     const sizeScale = size === 'large' ? 1.5 : size === 'small' ? 0.65 : 1.0;
     const poleHeight = 0.8 * sizeScale;
 
-    // Flag pole (thin cylinder)
+    // Flag pole (thin cylinder) — positions relative to group
     const poleGeo = new THREE.CylinderGeometry(0.02, 0.02, poleHeight, 6);
     const poleMat = new THREE.MeshStandardMaterial({
       color: 0x8b7355,
@@ -156,11 +158,11 @@ export class GameMap {
       metalness: 0.1,
     });
     const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.set(world.x, poleHeight / 2, world.z);
+    pole.position.set(0, poleHeight / 2, 0);
     pole.castShadow = true;
     nodeGroup.add(pole);
 
-    // Flag cloth (flat plane hanging from top of pole)
+    // Flag cloth (flat plane hanging from top of pole) — positions relative to group
     const flagWidth = 0.3 * sizeScale;
     const flagHeight = 0.2 * sizeScale;
     const flagGeo = new THREE.PlaneGeometry(flagWidth, flagHeight);
@@ -171,14 +173,12 @@ export class GameMap {
       side: THREE.DoubleSide,
     });
     const flag = new THREE.Mesh(flagGeo, flagMat);
-    // Position at top of pole, offset to the right so it hangs off the pole
-    flag.position.set(world.x + flagWidth / 2 + 0.02, poleHeight - flagHeight / 2, world.z);
+    flag.position.set(flagWidth / 2 + 0.02, poleHeight - flagHeight / 2, 0);
     flag.castShadow = true;
     flag.userData.taskId = taskId;
     flag.userData.isResourceNode = true;
     flag.userData.size = size;
     flag.userData.originalColor = color;
-    flag.userData.flagOffsetX = flagWidth / 2 + 0.02;
     nodeGroup.add(flag);
 
     nodeGroup.visible = false;
@@ -204,22 +204,7 @@ export class GameMap {
     if (!group) return;
 
     const world = this.grid.tileToWorld(col, row);
-
-    // Move all children's positions relative to the new world position
-    group.traverse(child => {
-      if (child.isMesh) {
-        if (child.userData.isResourceNode) {
-          // Flag cloth — offset from pole
-          const flagOffsetX = child.userData.flagOffsetX || 0;
-          child.position.x = world.x + flagOffsetX;
-          child.position.z = world.z;
-        } else {
-          // Pole
-          child.position.x = world.x;
-          child.position.z = world.z;
-        }
-      }
-    });
+    group.position.set(world.x, 0, world.z);
   }
 
   setResourceNodeDepleted(taskId) {
@@ -266,13 +251,7 @@ export class GameMap {
   getResourceNodeWorldPosition(taskId) {
     const group = this._resourceNodeGroups.get(taskId);
     if (!group) return null;
-    let pos = null;
-    group.traverse(child => {
-      if (child.isMesh && child.userData.isResourceNode && !pos) {
-        pos = { x: child.position.x, z: child.position.z };
-      }
-    });
-    return pos;
+    return { x: group.position.x, z: group.position.z };
   }
 
   /**
@@ -423,7 +402,7 @@ export class GameMap {
         // Gentle flag sway (oscillate rotation around Z axis)
         const swaySpeed = health === 'stagnant' ? 0.5 : 1.5;
         const swayAmount = health === 'stagnant' ? 0.03 : 0.08;
-        child.rotation.z = Math.sin(this._time * swaySpeed + child.position.x * 3) * swayAmount;
+        child.rotation.z = Math.sin(this._time * swaySpeed + group.position.x * 3) * swayAmount;
 
         // Emissive pulsing for atRisk/overdue
         if (health === 'atRisk') {
