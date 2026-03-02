@@ -1,32 +1,44 @@
-# Work RPG
+# Realm of Sprints
 
-An Age of Empires–inspired isometric visualization that turns your team's task progress into a fog-of-war resource-gathering game. Built with Three.js.
+A fantasy atlas that turns your team's sprint progress into a living world. Built with Three.js.
 
 ## The Idea
 
-Every team member becomes a **unit** on a procedurally generated map. Tasks are **resource nodes** scattered across the terrain — the more discovery-heavy a task, the farther it spawns from base. Milestones become **structures** that units build once their contributing tasks are complete.
+Your team members are **adventurers** exploring a vast realm. Each task is a **quest marker** placed in a biome that matches its work stage. Completed work becomes **treasure** brought back to the castle. As a manager, you open the map and immediately see where everyone is, what they're working on, and who might need help.
 
-Units autonomously scout through fog of war, gather resources, return them to the town center, and build milestone structures — all driven by real task data.
+### How work maps to the world
 
-### How work maps to gameplay
-
-| Work concept | Game equivalent |
+| Work concept | World equivalent |
 |---|---|
-| **Person** | Unit with colored avatar, name label, and stamina bar |
-| **Task** | Resource node (crystal) placed on the map |
-| **Discovery %** | Distance from base — high-discovery tasks are hidden deep in fog |
-| **Execution %** | Gather speed — execution-heavy tasks are faster to collect |
-| **Task completion** | Resource depletion — nodes grey out at 100% |
-| **Milestone** | Structure — wireframe fills in as contributing tasks complete |
-| **Deadline pressure** | Stamina drain — overdue tasks sap a unit's energy |
+| **Person** | Adventurer avatar with color, name, and stamina |
+| **Task** | Quest marker in a biome — size reflects effort (S/M/L) |
+| **Work stage** | Biome zone — planning near the castle, building in the forest, presenting at the summit |
+| **Task completion** | Town portal opens, gem flies back to the castle treasury |
+| **Milestone** | Structure that fills in as contributing tasks complete |
+| **Deadline pressure** | Marker glows amber (at risk) or red (overdue) with pulsing |
+| **Stagnation** | Marker dims and slows when stuck too long in the same stage |
+| **Workload** | Overloaded team members flagged in their detail panel |
 
-### Dynamic fog of war
+### The map
 
-The map starts shrouded in black fog. As units explore, tiles are permanently revealed with a translucent overlay. Tiles near a unit are fully transparent — when the unit moves away, fog gently returns to a semi-transparent state. The result is a living map that shows exploration history while keeping the frontier visible.
+A ~180° fan-shaped continent radiates from the castle at the left edge. Eight biomes arc outward in roughly concentric bands:
 
-### Unit behavior
+**Castle → Meadow → Hills → Forest → Quarry → Scriptorium → Market → Summit**
 
-Units follow a state machine: **Idle → Scouting → Moving to Resource → Gathering → Returning to Base → Depositing → Building → Resting**. They prioritize overdue tasks, scout toward undiscovered high-discovery resources via BFS frontier search, and rest at base when stamina is low.
+Boundaries are noise-warped for an organic feel. Each biome has its own terrain palette and tile distribution. Tasks are placed in the biome matching their current work stage — when a task's stage changes, its marker relocates to the new biome.
+
+### The castle
+
+The castle is home base — the origin of all journeys. Avatars spawn here, and completed task gems accumulate in a treasury courtyard. The castle visually evolves through five levels as the team completes work, from a modest wooden fort to a golden fortress with glowing accents.
+
+### Health signals
+
+The system watches for two problems automatically:
+
+- **Deadline pressure** — markers glow amber within 3 days of deadline, red when overdue
+- **Stagnation** — markers dim and slow their rotation when a task sits in the same stage too long without progress (configurable per-stage thresholds)
+
+Clicking any marker or avatar surfaces these signals in the UI alongside action buttons (email, schedule 1:1, open in source tool).
 
 ## Running Locally
 
@@ -35,7 +47,7 @@ npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5174`.
+Opens at `http://localhost:5173`.
 
 ## Data Sources
 
@@ -48,52 +60,11 @@ The sheet should have three tabs: **People**, **Tasks**, and **Milestones**.
 
 ## Tech
 
-- **Three.js** — isometric orthographic camera, InstancedMesh terrain, DataTexture fog overlay
+- **Three.js** — isometric orthographic camera, InstancedMesh terrain, DataTexture fog
 - **Vite** — dev server and production builds
 - **Vanilla JS** — no framework, ES modules throughout
-- **localStorage** — persists task progress across sessions
-- **A\* pathfinding** — on a 48×48 tile grid with procedural terrain
-
-## Project Structure
-
-```
-src/
-  data/
-    DataAdapter.js          # Interface for data sources
-    SeedAdapter.js          # Built-in demo data (6 people, 10 tasks)
-    GoogleSheetsAdapter.js  # Fetches CSV from a published Google Sheet
-    ResourceCalculator.js   # Stamina, scout speed, gather rate formulas
-    Store.js                # localStorage-backed store with event emitter
-  map/
-    GameGrid.js             # 48×48 tile grid, A* pathfinding, fog state
-    TerrainGenerator.js     # Procedural terrain, resource/structure placement
-    GameMap.js              # Three.js terrain renderer (InstancedMesh per tile type)
-    FogOfWar.js             # DataTexture fog with two-layer alpha system
-    Base.js                 # Town center mesh and spawn positions
-  scene/
-    SceneManager.js         # Three.js renderer, camera, lighting
-    Avatar.js               # Unit mesh, walk/gather/build animations
-    CameraControls.js       # Pan, zoom, rotate (mouse + touch)
-    EnergyBar.js            # Floating stamina bar above each unit
-  units/
-    UnitManager.js          # Behavior assignment, pathfinding, state handlers
-    UnitState.js            # State machine (9 states) with transition logic
-  interaction/
-    Raycaster.js            # Click/hover detection on units, resources, structures
-    Tooltip.js              # Hover tooltip with person name
-  ui/
-    DetailPanel.js          # Side panel with stamina breakdown and task list
-    EditorPanel.js          # Team editor for adding/editing people and tasks
-    TaskForm.js             # Task creation/editing form
-    Toolbar.js              # Top toolbar with Team Editor button
-  utils/
-    Colors.js               # Resource category color palette
-    Config.js               # Map size, base radius, data source settings
-    Geometry.js             # Shared geometry helpers (text sprites, shadows)
-    Math.js                 # UUID generation, clamp, lerp
-  styles/
-    main.css                # UI styling
-```
+- **localStorage** — persists progress across sessions
+- **A\* pathfinding** — on an 80×80 tile grid with procedural biome terrain
 
 ## Deployment
 
