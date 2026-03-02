@@ -105,8 +105,8 @@ export class BiomeTerrainGenerator {
     const castleRow = Math.floor(grid.height / 2);
     const maxRadius = grid.width * 0.82; // how far the fan extends rightward
 
-    // Fan angular range: -π/2 to +π/2 (pointing right, 180° spread)
-    const fanHalfAngle = Math.PI * 0.5;
+    // Fan angular range: -75° to +75° (pointing right, 150° spread)
+    const fanHalfAngle = Math.PI * (75 / 180);
 
     // Store castle position for external access
     this._castleCol = castleCol;
@@ -114,8 +114,7 @@ export class BiomeTerrainGenerator {
     this._maxRadius = maxRadius;
     this._fanHalfAngle = fanHalfAngle;
 
-    // Precompute noise warp strengths per biome boundary
-    // Higher values = more organic/irregular
+    // Biome border warp strength
     const warpStrength = 0.08;
 
     for (let row = 0; row < grid.height; row++) {
@@ -128,22 +127,32 @@ export class BiomeTerrainGenerator {
         // Normalized distance (0 at castle, 1 at maxRadius)
         const rNorm = dist / maxRadius;
 
-        // Check if within the fan shape
-        if (rNorm > 1.15 || Math.abs(angle) > fanHalfAngle + 0.15) {
+        // Hard cutoff well beyond the fan (saves work)
+        if (rNorm > 1.35 || Math.abs(angle) > fanHalfAngle + 0.4) {
           grid.setTile(col, row, { type: TileType.VOID, biome: null });
           continue;
         }
 
-        // Soft edge at fan boundary (water/void)
-        const edgeNoise = valueNoise(col * 0.8, row * 0.8, 5) * warpStrength * 2;
-        const fanEdgeDist = Math.abs(angle) / fanHalfAngle + edgeNoise;
-        const radialEdgeDist = rNorm + edgeNoise;
+        // Multi-octave coastline noise for organic edges
+        // Use angle-based seed offset so the radial and angular edges differ
+        const coastNoise1 = valueNoise(col * 0.4, row * 0.4, 7);       // large bays/peninsulas
+        const coastNoise2 = valueNoise(col * 0.9 + 100, row * 0.9 + 100, 5); // medium coves
+        const coastNoise3 = valueNoise(col * 2.0 + 300, row * 2.0 + 300, 3); // fine crags
+        const coastWarp = (coastNoise1 * 0.55 + coastNoise2 * 0.3 + coastNoise3 * 0.15 - 0.5) * 0.25;
 
-        if (fanEdgeDist > 1.08 || radialEdgeDist > 1.08) {
+        // Different noise sample for the angular edge (so top/bottom differ from the arc)
+        const angCoastNoise1 = valueNoise(col * 0.35 + 500, row * 0.35 + 500, 8);
+        const angCoastNoise2 = valueNoise(col * 0.8 + 600, row * 0.8 + 600, 4);
+        const angCoastWarp = (angCoastNoise1 * 0.6 + angCoastNoise2 * 0.4 - 0.5) * 0.2;
+
+        const fanEdgeDist = Math.abs(angle) / fanHalfAngle + angCoastWarp;
+        const radialEdgeDist = rNorm + coastWarp;
+
+        if (fanEdgeDist > 1.06 || radialEdgeDist > 1.06) {
           grid.setTile(col, row, { type: TileType.VOID, biome: null });
           continue;
         }
-        if (fanEdgeDist > 0.98 || radialEdgeDist > 0.98) {
+        if (fanEdgeDist > 0.96 || radialEdgeDist > 0.96) {
           grid.setTile(col, row, { type: TileType.WATER, biome: null });
           continue;
         }

@@ -305,7 +305,15 @@ async function boot() {
     centerX: bounds.centerX + offset.x,
     centerZ: bounds.centerZ + offset.z,
   };
-  const cameraControls = new CameraControls(camera, renderer, adjustedBounds);
+  // Start camera focused on the fan's midpoint (horizontally centered on content, not grid)
+  const castleWorldOffset = {
+    x: castleWorldPos.x + offset.x,
+    z: castleWorldPos.z + offset.z,
+  };
+  // Focus slightly right of castle so the fan is centered in view
+  const fanMidX = castleWorldOffset.x + mapInfo.maxRadius * 0.45;
+  const initialFocus = { x: fanMidX, z: castleWorldOffset.z };
+  const cameraControls = new CameraControls(camera, renderer, adjustedBounds, initialFocus);
 
   // --- Units (all start hidden — spawn sequencer reveals them) ---
   const unitManager = new UnitManager(scene, grid, gameMap, fog, store, base);

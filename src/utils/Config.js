@@ -10,7 +10,7 @@ export const CONFIG = {
   SYNC_INTERVAL_MS: 60000,
 
   // Map
-  MAP_SIZE: 80,
+  MAP_SIZE: 100,
   BASE_RADIUS: 6,
 
   // Unit sight

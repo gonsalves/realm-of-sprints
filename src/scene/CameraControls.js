@@ -1,21 +1,21 @@
 import { lerp, clamp } from '../utils/Math.js';
 
 export class CameraControls {
-  constructor(camera, renderer, bounds) {
+  constructor(camera, renderer, bounds, initialFocus) {
     this.camera = camera;
     this.domElement = renderer.domElement;
     this.bounds = bounds;
 
     // Camera target (what we're looking at, on the XZ plane)
-    this.targetX = bounds.centerX;
-    this.targetZ = bounds.centerZ;
+    this.targetX = initialFocus ? initialFocus.x : bounds.centerX;
+    this.targetZ = initialFocus ? initialFocus.z : bounds.centerZ;
     this.currentX = this.targetX;
     this.currentZ = this.targetZ;
 
     // Zoom
-    this.zoom = 1;
-    this.targetZoom = 1;
-    this.minZoom = 0.4;
+    this.zoom = 0.35;
+    this.targetZoom = 0.35;
+    this.minZoom = 0.2;
     this.maxZoom = 2.5;
 
     // Drag state
