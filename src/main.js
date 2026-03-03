@@ -220,7 +220,7 @@ async function boot() {
   // Reveal coastline so map edges are always visible
   fog.revealCoastline(4);
 
-  // Reveal base area (castle is at left side in v2 fan layout)
+  // Reveal base area (castle is at bottom-center in v2 fan layout)
   const castleCol = mapInfo.castleCol;
   const castleRow = mapInfo.castleRow;
   fog.revealRadius(castleCol, castleRow, CONFIG.BASE_RADIUS + 8);
@@ -291,14 +291,14 @@ async function boot() {
     centerX: bounds.centerX + offset.x,
     centerZ: bounds.centerZ + offset.z,
   };
-  // Start camera focused on the fan's midpoint (horizontally centered on content, not grid)
+  // Start camera focused on the fan's midpoint (vertically centered on content, not grid)
   const castleWorldOffset = {
     x: castleWorldPos.x + offset.x,
     z: castleWorldPos.z + offset.z,
   };
-  // Focus slightly right of castle so the fan is centered in view
-  const fanMidX = castleWorldOffset.x + mapInfo.maxRadius * 0.45;
-  const initialFocus = { x: fanMidX, z: castleWorldOffset.z };
+  // Focus above castle so the upward-opening fan is centered in view
+  const fanMidZ = castleWorldOffset.z - mapInfo.maxRadius * 0.45;
+  const initialFocus = { x: castleWorldOffset.x, z: fanMidZ };
   const cameraControls = new CameraControls(camera, renderer, adjustedBounds, initialFocus);
 
   // --- Units (all start hidden — spawn sequencer reveals them) ---

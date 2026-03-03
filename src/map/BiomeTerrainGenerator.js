@@ -99,13 +99,13 @@ export class BiomeTerrainGenerator {
   generate(grid, seed = 42) {
     const rand = seededRandom(seed);
 
-    // Castle position: left-center of the grid
+    // Castle position: bottom-center of the grid
     // Leave a margin so the castle isn't flush against the edge
-    const castleCol = Math.floor(grid.width * 0.12);
-    const castleRow = Math.floor(grid.height / 2);
-    const maxRadius = grid.width * 0.82; // how far the fan extends rightward
+    const castleCol = Math.floor(grid.width / 2);
+    const castleRow = Math.floor(grid.height * 0.88);
+    const maxRadius = grid.height * 0.82; // how far the fan extends upward
 
-    // Fan angular range: -75° to +75° (pointing right, 150° spread)
+    // Fan angular range: -75° to +75° (pointing upward, 150° spread)
     const fanHalfAngle = Math.PI * (75 / 180);
 
     // Store castle position for external access
@@ -122,7 +122,7 @@ export class BiomeTerrainGenerator {
         const dx = col - castleCol;
         const dz = row - castleRow;
         const dist = Math.sqrt(dx * dx + dz * dz);
-        const angle = Math.atan2(dz, dx); // -π to π, 0 = right
+        const angle = Math.atan2(dx, -dz); // -π to π, 0 = up
 
         // Normalized distance (0 at castle, 1 at maxRadius)
         const rNorm = dist / maxRadius;
@@ -300,8 +300,9 @@ export class BiomeTerrainGenerator {
       const r = (rMin + rand() * (rMax - rMin)) * this._maxRadius;
       const angle = (rand() - 0.5) * 2 * this._fanHalfAngle * 0.85; // stay inside fan
 
-      let col = Math.round(this._castleCol + Math.cos(angle) * r);
-      let row = Math.round(this._castleRow + Math.sin(angle) * r);
+      // Fan points upward: angle 0 = up (-row), positive = clockwise
+      let col = Math.round(this._castleCol + Math.sin(angle) * r);
+      let row = Math.round(this._castleRow - Math.cos(angle) * r);
 
       // Clamp and ensure walkable
       col = Math.max(1, Math.min(grid.width - 2, col));
@@ -347,8 +348,9 @@ export class BiomeTerrainGenerator {
       const r = (rMin + rand() * (rMax - rMin)) * this._maxRadius;
       const angle = (rand() - 0.5) * 2 * this._fanHalfAngle * 0.8;
 
-      let col = Math.round(this._castleCol + Math.cos(angle) * r);
-      let row = Math.round(this._castleRow + Math.sin(angle) * r);
+      // Fan points upward: angle 0 = up (-row), positive = clockwise
+      let col = Math.round(this._castleCol + Math.sin(angle) * r);
+      let row = Math.round(this._castleRow - Math.cos(angle) * r);
 
       col = Math.max(2, Math.min(grid.width - 3, col));
       row = Math.max(2, Math.min(grid.height - 3, row));
