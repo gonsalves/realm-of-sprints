@@ -15,15 +15,15 @@ describe('BiomeTerrainGenerator', () => {
       }
     });
 
-    it('returns castle position in the left portion of the map', () => {
+    it('returns castle position at bottom-center of the map', () => {
       const grid = new GameGrid(80, 80);
       const gen = new BiomeTerrainGenerator();
       const info = gen.generate(grid);
 
-      // Castle should be in the left ~15% of the map
-      expect(info.castleCol).toBeLessThan(grid.width * 0.2);
-      // Castle should be vertically centered
-      expect(info.castleRow).toBe(Math.floor(grid.height / 2));
+      // Castle should be horizontally centered
+      expect(info.castleCol).toBe(Math.floor(grid.width / 2));
+      // Castle should be near the bottom (~88% down)
+      expect(info.castleRow).toBe(Math.floor(grid.height * 0.88));
     });
 
     it('places dirt in the castle base area', () => {
@@ -81,16 +81,16 @@ describe('BiomeTerrainGenerator', () => {
       const gen = new BiomeTerrainGenerator();
       const info = gen.generate(grid);
 
-      // Sample tiles at increasing distances from castle along the fan center (rightward)
+      // Sample tiles at increasing distances from castle along the fan center (upward)
       const castleCol = info.castleCol;
       const castleRow = info.castleRow;
 
-      // Near castle should be castle or meadow biome
-      const nearTile = grid.getTile(castleCol + 8, castleRow);
+      // Near castle (a few rows upward) should be castle or meadow biome
+      const nearTile = grid.getTile(castleCol, castleRow - 8);
       expect([Biome.CASTLE, Biome.MEADOW]).toContain(nearTile.biome);
 
-      // Far from castle (rightward) should be an outer biome
-      const farTile = grid.getTile(castleCol + 50, castleRow);
+      // Far from castle (upward) should be an outer biome
+      const farTile = grid.getTile(castleCol, castleRow - 50);
       if (farTile && farTile.biome) {
         expect([Biome.CASTLE, Biome.MEADOW]).not.toContain(farTile.biome);
       }
